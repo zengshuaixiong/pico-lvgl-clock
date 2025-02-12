@@ -1,0 +1,5 @@
+lib/lvgl/CMakeFiles/LVGL.dir/src/misc/lv_utils.c.obj: \
+ /home/oscar/pico/lvgl8.1/lib/lvgl/src/misc/lv_utils.c \
+ /usr/lib/gcc/arm-none-eabi/10.3.1/include/stddef.h \
+ /home/oscar/pico/lvgl8.1/lib/lvgl/src/misc/lv_utils.h \
+ /usr/lib/gcc/arm-none-eabi/10.3.1/include/stdint.h
