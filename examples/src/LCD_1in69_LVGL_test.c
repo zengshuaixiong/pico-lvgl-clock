@@ -57,6 +57,9 @@ int press_time = 0;
 #define LABEL_FONT    lv_font_montserrat_18
 #define LABEL_LENGTH  CLOCK_RADIUS-12
 
+// 定义窗口数量
+#define NUM_WINDOWS 3
+
 // 定义变量存储选中的数字
 static int clock_hour = 0;
 static int clock_minute = 0;
@@ -72,7 +75,14 @@ static lv_obj_t* roller_hour;
 static lv_obj_t* roller_minute;
 static lv_obj_t* roller_second;
 
+// 定义显示时钟的按钮
+static lv_obj_t* button_dispay[7*4];
+
 static int buffer_set_time = false;
+
+// 全局变量：窗口对象和当前窗口索引
+static lv_obj_t* windows[NUM_WINDOWS];
+static int current_window = 0;
 
 // 定义直线的起点和终点坐标
     static lv_point_t line_points_hour[] = {
@@ -94,9 +104,98 @@ static int buffer_set_time = false;
 
 static datetime_t time_all;
 
+
+static void btn_display_clock(uint8_t hour,uint8_t min)
+{
+  uint8_t first = hour/10;
+  uint8_t second = hour%10;
+  uint8_t third = min/10;
+  uint8_t fourth = min%10;
+  uint8_t mysegable[] = {
+          0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f,
+          0x77,0x7c,0x39,0x5e,0x79,0x71,0x3d,0x76,0x0f,0x0e,
+          0x75,0x38,0x37,0x54,0x5c,0x73,0x67,0x31,0x49,0x78,
+          0x3e,0x1c,0x7e,0x64,0x6e,0x59
+          };
+  first = mysegable[first];
+  second = mysegable[second];
+  third = mysegable[third];
+  fourth = mysegable[fourth];
+  for(uint8_t i=0;i<4;i++)
+  {
+    for(uint8_t ii=0;ii<7;ii++)
+    {
+      if(i==0)
+      {
+        if(first & 0x01)
+          lv_obj_clear_flag(button_dispay[ii], LV_OBJ_FLAG_HIDDEN);
+        else
+          lv_obj_add_flag(button_dispay[ii], LV_OBJ_FLAG_HIDDEN);
+        first = first >> 1;
+      }
+      if(i==1)
+      {
+        if(second & 0x01)
+          lv_obj_clear_flag(button_dispay[ii+7], LV_OBJ_FLAG_HIDDEN);
+        else
+          lv_obj_add_flag(button_dispay[ii+7], LV_OBJ_FLAG_HIDDEN);
+        second = second >> 1;
+      }
+      if(i==2)
+      {
+        if(third & 0x01)
+          lv_obj_clear_flag(button_dispay[ii+7*2], LV_OBJ_FLAG_HIDDEN);
+        else
+          lv_obj_add_flag(button_dispay[ii+7*2], LV_OBJ_FLAG_HIDDEN);
+        third = third >> 1;
+      }
+      if(i==3)
+      {
+        if(fourth & 0x01)
+          lv_obj_clear_flag(button_dispay[ii+7*3], LV_OBJ_FLAG_HIDDEN);
+        else
+          lv_obj_add_flag(button_dispay[ii+7*3], LV_OBJ_FLAG_HIDDEN);
+        fourth = fourth >> 1;
+      }
+    }
+  }
+}
+
+
 //滑动动画回调函数
 static void set_x_anim(void* obj, int32_t value) {
     lv_obj_set_x((lv_obj_t*)obj, value);
+}
+
+static void switch_window(int direction) {
+    int target_window = current_window + direction;
+
+    // 处理边界
+    if (target_window < 0) {
+        target_window = NUM_WINDOWS - 1;
+    } else if (target_window >= NUM_WINDOWS) {
+        target_window = 0;
+    }
+
+    // 计算目标窗口的 X 坐标
+    int target_x = direction * LV_HOR_RES;
+
+    // 动画：当前窗口向左或向右移出
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, windows[current_window]);
+    lv_anim_set_values(&a, lv_obj_get_x(windows[current_window]), target_x);
+    lv_anim_set_exec_cb(&a, set_x_anim);
+    lv_anim_set_time(&a, 300);
+    lv_anim_start(&a);
+
+    // 动画：目标窗口从左侧或右侧进入
+    lv_anim_set_var(&a, windows[target_window]);
+    lv_anim_set_values(&a, -target_x, 0);
+    lv_anim_start(&a);
+
+    // 更新当前窗口索引
+    current_window = target_window;
 }
 
 // 手势事件处理函数
@@ -180,11 +279,13 @@ static void timer_callback(lv_timer_t* timer) {
     struct tm* timeinfo = localtime(&now);
 	PCF85063A_Read_now(&time_all);
 	update_clock_hands(time_all.hour,time_all.min,time_all.sec);
+	btn_display_clock(time_all.hour,time_all.min);
 	
 	if(buffer_set_time == false)
     {
       lv_roller_set_selected(roller_hour,time_all.hour,LV_ANIM_OFF);
       lv_roller_set_selected(roller_minute,time_all.min,LV_ANIM_OFF);
+      
       
     }
 	//update_clock_hands(time_all->hour,time_all->min,time_all->sec);
@@ -245,29 +346,93 @@ void lv_example_get_started_1(void)
     lv_obj_set_style_bg_color(win2, lv_color_hex(0xFFFFFF), 0); // 设置背景颜色
     lv_obj_set_x(win2, WIN_WIDTH); // 初始位置在屏幕右侧
 
+    lv_obj_t* win3 = lv_obj_create(scr);
+    lv_obj_set_size(win3, WIN_WIDTH, WIN_HEIGHT);
+    lv_obj_set_style_bg_color(win3, lv_color_hex(0xFFFFFF), 0); // 设置背景颜色
+    lv_obj_set_x(win3, WIN_WIDTH); // 初始位置在屏幕右侧
+
+    windows[0] = win1;
+    windows[1] = win2;
+    windows[2] = win3;
+
+    lv_obj_t* button_disable = lv_btn_create(win1);
+    lv_obj_align(button_disable, LV_ALIGN_CENTER,0,0);
+    lv_obj_add_flag(button_disable, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t* label_txt = lv_label_create(win1);
+    lv_label_set_text(label_txt, "GOOD GOOD STDUY"); // 设置文本内容
+    lv_obj_set_style_text_color(label_txt, LABEL_COLOR, 0); // 文本颜色
+    lv_obj_set_style_text_font(label_txt, &LABEL_FONT, 0); // 字体大小
+    lv_obj_align(label_txt, LV_ALIGN_CENTER, 0, 0+30); // 位置显示
+
+    lv_obj_t* label_txt2 = lv_label_create(win1);
+    lv_label_set_text(label_txt2, "DAY DAY UP"); // 设置文本内容
+    lv_obj_set_style_text_color(label_txt2, LABEL_COLOR, 0); // 文本颜色
+    lv_obj_set_style_text_font(label_txt2, &LABEL_FONT, 0); // 字体大小
+    lv_obj_align(label_txt2, LV_ALIGN_CENTER, 0, 0+30+30); // 位置显示
+
+    for(uint8_t i=0;i<7*4;i++)
+    {
+      uint8_t grid_dispay = 57;
+      uint8_t y_off = 40;
+      uint8_t x_off = 15;
+      button_dispay[i] = lv_btn_create(win1);
+      lv_obj_set_size(button_dispay[i], 30, 10);
+      switch (i%7)
+      {
+      case 0://a
+        lv_obj_align(button_dispay[i], LV_ALIGN_CENTER, -WIN_WIDTH/2+(i/7)*grid_dispay+30-x_off, -WIN_HEIGHT/2+y_off);
+        break;
+      case 1://b
+        lv_obj_set_size(button_dispay[i], 10, 30);
+        lv_obj_align(button_dispay[i], LV_ALIGN_CENTER, -WIN_WIDTH/2+(i/7)*grid_dispay+15+30-x_off, -WIN_HEIGHT/2+y_off+15);
+        break;
+      case 2://c
+        lv_obj_set_size(button_dispay[i], 10, 30);
+        lv_obj_align(button_dispay[i], LV_ALIGN_CENTER, -WIN_WIDTH/2+(i/7)*grid_dispay+45-x_off, -WIN_HEIGHT/2+y_off+45);
+        break;
+      case 3://d
+        lv_obj_align(button_dispay[i], LV_ALIGN_CENTER, -WIN_WIDTH/2+(i/7)*grid_dispay+30-x_off, -WIN_HEIGHT/2+y_off+60);
+        break;
+      case 4://e
+        lv_obj_set_size(button_dispay[i], 10, 30);
+        lv_obj_align(button_dispay[i], LV_ALIGN_CENTER, -WIN_WIDTH/2+(i/7)*grid_dispay+15-x_off, -WIN_HEIGHT/2+y_off+45);
+        break;
+      case 5://f
+        lv_obj_set_size(button_dispay[i], 10, 30);
+        lv_obj_align(button_dispay[i], LV_ALIGN_CENTER, -WIN_WIDTH/2+(i/7)*grid_dispay+15-x_off, -WIN_HEIGHT/2+y_off+15);
+        break;
+      case 6://g
+        lv_obj_align(button_dispay[i], LV_ALIGN_CENTER, -WIN_WIDTH/2+(i/7)*grid_dispay+30-x_off, -WIN_HEIGHT/2+y_off+30);
+        break;
+      default:
+        break;
+      }
+    }
+
      // 创建小时滚盘
-    roller_hour = lv_roller_create(win2);
+    roller_hour = lv_roller_create(win3);
     lv_roller_set_options(roller_hour, "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23", LV_ROLLER_MODE_NORMAL);
     lv_obj_set_size(roller_hour, 50, 150);
     lv_obj_align(roller_hour, LV_ALIGN_CENTER, -70, -0);
     lv_obj_add_event_cb(roller_hour, roller_event_handler, LV_EVENT_VALUE_CHANGED, NULL);
 
     // 创建分钟滚盘
-    roller_minute = lv_roller_create(win2);
+    roller_minute = lv_roller_create(win3);
     lv_roller_set_options(roller_minute, "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59", LV_ROLLER_MODE_NORMAL);
     lv_obj_set_size(roller_minute, 50, 150);
     lv_obj_align(roller_minute, LV_ALIGN_CENTER, 0, -0);
     lv_obj_add_event_cb(roller_minute, roller_event_handler, LV_EVENT_VALUE_CHANGED, NULL);
 
     // 创建秒滚盘
-    roller_second = lv_roller_create(win2);
+    roller_second = lv_roller_create(win3);
     lv_roller_set_options(roller_second, "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59", LV_ROLLER_MODE_NORMAL);
     lv_obj_set_size(roller_second, 50, 150);
     lv_obj_align(roller_second, LV_ALIGN_CENTER, 70, -0);
     lv_obj_add_event_cb(roller_second, roller_event_handler, LV_EVENT_VALUE_CHANGED, NULL);
 
      // 创建圆形钟表背景
-    lv_obj_t * clock = lv_obj_create(win1);
+    lv_obj_t * clock = lv_obj_create(win2);
 
     // 设置圆形的宽度和高度相等，确保它是一个圆形
     lv_obj_set_size(clock, CLOCK_RADIUS*2, CLOCK_RADIUS*2);  // 250x250 像素的钟表背景
@@ -289,7 +454,7 @@ void lv_example_get_started_1(void)
     lv_obj_add_style(clock, &style, 0);
 
     // 创建一条直线
-    hour_hand = lv_line_create(win1);
+    hour_hand = lv_line_create(win2);
     // 设置直线的点坐标
     lv_line_set_points(hour_hand, line_points_hour, 2);
     // 设置直线的样式
@@ -298,7 +463,7 @@ void lv_example_get_started_1(void)
     lv_obj_set_style_line_opa(hour_hand, LV_OPA_COVER, 0);     // 完全不透明
 
     // 创建一条直线
-    minute_hand = lv_line_create(win1);
+    minute_hand = lv_line_create(win2);
     // 设置直线的点坐标
     lv_line_set_points(minute_hand, line_points_min, 2);
     // 设置直线的样式
@@ -307,7 +472,7 @@ void lv_example_get_started_1(void)
     lv_obj_set_style_line_opa(minute_hand, LV_OPA_COVER, 0);     // 完全不透明
 
     // 创建一条直线
-    second_hand = lv_line_create(win1);
+    second_hand = lv_line_create(win2);
     // 设置直线的点坐标
     lv_line_set_points(second_hand, line_points_sec, 2);
     // 设置直线的样式
@@ -316,85 +481,89 @@ void lv_example_get_started_1(void)
     lv_obj_set_style_line_opa(second_hand, LV_OPA_COVER, 0);     // 完全不透明
 
     // 创建标签并设置文本
-    lv_obj_t* label12 = lv_label_create(win1);
+    lv_obj_t* label12 = lv_label_create(win2);
     lv_label_set_text(label12, "12"); // 设置文本内容
     lv_obj_set_style_text_color(label12, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label12, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label12, LV_ALIGN_CENTER, 0, -(LABEL_LENGTH)); // 位置显示
 
-    lv_obj_t* label3 = lv_label_create(win1);
+    lv_obj_t* label3 = lv_label_create(win2);
     lv_label_set_text(label3, "3"); // 设置文本内容
     lv_obj_set_style_text_color(label3, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label3, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label3, LV_ALIGN_CENTER, LABEL_LENGTH, 0); // 位置显示
 
-    lv_obj_t* label6 = lv_label_create(win1);
+    lv_obj_t* label6 = lv_label_create(win2);
     lv_label_set_text(label6, "6"); // 设置文本内容
     lv_obj_set_style_text_color(label6, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label6, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label6, LV_ALIGN_CENTER, 0, LABEL_LENGTH); // 位置显示
 
-    lv_obj_t* label9 = lv_label_create(win1);
+    lv_obj_t* label9 = lv_label_create(win2);
     lv_label_set_text(label9, "9"); // 设置文本内容
     lv_obj_set_style_text_color(label9, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label9, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label9, LV_ALIGN_CENTER, -(LABEL_LENGTH), 0); // 位置显示
 
-    lv_obj_t* label1 = lv_label_create(win1);
+    lv_obj_t* label1 = lv_label_create(win2);
     lv_label_set_text(label1, "1"); // 设置文本内容
     lv_obj_set_style_text_color(label1, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label1, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label1, LV_ALIGN_CENTER, (LABEL_LENGTH)*sin(30.0 * M_PI / 180.0), -(LABEL_LENGTH)*cos(30.0 * M_PI / 180.0)); // 位置显示
 
-    lv_obj_t* label2 = lv_label_create(win1);
+    lv_obj_t* label2 = lv_label_create(win2);
     lv_label_set_text(label2, "2"); // 设置文本内容
     lv_obj_set_style_text_color(label2, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label2, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label2, LV_ALIGN_CENTER, (LABEL_LENGTH)*sin(60.0 * M_PI / 180.0), -(LABEL_LENGTH)*cos(60.0 * M_PI / 180.0)); // 位置显示
 
-    lv_obj_t* label4 = lv_label_create(win1);
+    lv_obj_t* label4 = lv_label_create(win2);
     lv_label_set_text(label4, "4"); // 设置文本内容
     lv_obj_set_style_text_color(label4, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label4, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label4, LV_ALIGN_CENTER, (LABEL_LENGTH)*sin(120.0 * M_PI / 180.0), -(LABEL_LENGTH)*cos(120.0 * M_PI / 180.0)); // 位置显示
 
-    lv_obj_t* label5 = lv_label_create(win1);
+    lv_obj_t* label5 = lv_label_create(win2);
     lv_label_set_text(label5, "5"); // 设置文本内容
     lv_obj_set_style_text_color(label5, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label5, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label5, LV_ALIGN_CENTER, (LABEL_LENGTH)*sin(150.0 * M_PI / 180.0), -(LABEL_LENGTH)*cos(150.0 * M_PI / 180.0)); // 位置显示
 
-    lv_obj_t* label7 = lv_label_create(win1);
+    lv_obj_t* label7 = lv_label_create(win2);
     lv_label_set_text(label7, "7"); // 设置文本内容
     lv_obj_set_style_text_color(label7, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label7, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label7, LV_ALIGN_CENTER, (LABEL_LENGTH)*sin(210.0 * M_PI / 180.0), -(LABEL_LENGTH)*cos(210.0 * M_PI / 180.0)); // 位置显示
 
-    lv_obj_t* label8 = lv_label_create(win1);
+    lv_obj_t* label8 = lv_label_create(win2);
     lv_label_set_text(label8, "8"); // 设置文本内容
     lv_obj_set_style_text_color(label8, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label8, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label8, LV_ALIGN_CENTER, (LABEL_LENGTH)*sin(240.0 * M_PI / 180.0), -(LABEL_LENGTH)*cos(240.0 * M_PI / 180.0)); // 位置显示
 
-    lv_obj_t* label10 = lv_label_create(win1);
+    lv_obj_t* label10 = lv_label_create(win2);
     lv_label_set_text(label10, "10"); // 设置文本内容
     lv_obj_set_style_text_color(label10, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label10, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label10, LV_ALIGN_CENTER, (LABEL_LENGTH)*sin(300.0 * M_PI / 180.0), -(LABEL_LENGTH)*cos(300.0 * M_PI / 180.0)); // 位置显示
 
-    lv_obj_t* label11 = lv_label_create(win1);
+    lv_obj_t* label11 = lv_label_create(win2);
     lv_label_set_text(label11, "11"); // 设置文本内容
     lv_obj_set_style_text_color(label11, LABEL_COLOR, 0); // 文本颜色
     lv_obj_set_style_text_font(label11, &LABEL_FONT, 0); // 字体大小
     lv_obj_align(label11, LV_ALIGN_CENTER, (LABEL_LENGTH)*sin(330.0 * M_PI / 180.0), -(LABEL_LENGTH)*cos(330.0 * M_PI / 180.0)); // 位置显示
 
 
+    // 初始化窗口位置
+    lv_obj_set_x(windows[0], 0); // 第一个窗口在屏幕左侧
+    lv_obj_set_x(windows[1], LV_HOR_RES); // 第二个窗口在屏幕右侧
+    lv_obj_set_x(windows[2], 2*LV_HOR_RES); // 第三个窗口在屏幕右侧
+
     // 添加手势事件处理
     lv_obj_add_event_cb(scr, event_handler, LV_EVENT_GESTURE, NULL);
 
-
-
     update_clock_hands(11,30,45);
+    btn_display_clock(98,41);
     // 创建定时器，每 100ms 更新一次
     lv_timer_create(timer_callback, 100, NULL);
 
